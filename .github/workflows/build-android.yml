@@ -23,6 +23,7 @@ jobs:
       - name: Generate Android project
         run: |
           flutter create --platforms=android --org ir.cybermatrix --project-name cybermatrix_tunnel .
+          rm -f test/widget_test.dart
           python3 - <<'PY'
           from pathlib import Path
           p = Path("android/app/src/main/AndroidManifest.xml")
