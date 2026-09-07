@@ -26,12 +26,26 @@ jobs:
           rm -f test/widget_test.dart
           python3 - <<'PY'
           from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          android_ns = 'http://schemas.android.com/apk/res/android'
+          ET.register_namespace('android', android_ns)
 
           manifest = Path('android/app/src/main/AndroidManifest.xml')
-          text = manifest.read_text()
-          text = text.replace('android:label="cybermatrix_tunnel"', 'android:label="سایبرماتریکس تونل"')
-          text = text.replace('<application', '<application\n        android:name=".MyApplication"\n        android:usesCleartextTraffic="true"', 1)
-          manifest.write_text(text)
+          tree = ET.parse(manifest)
+          root = tree.getroot()
+          application = root.find('application')
+          if application is None:
+              raise RuntimeError('application node not found in AndroidManifest.xml')
+
+          application.set(f'{{{android_ns}}}label', 'سایبرماتریکس تونل')
+          application.set(f'{{{android_ns}}}name', '.MyApplication')
+          application.set(f'{{{android_ns}}}usesCleartextTraffic', 'true')
+          tree.write(manifest, encoding='utf-8', xml_declaration=True)
+
+          # Verify the manifest is still valid XML before Gradle runs.
+          ET.parse(manifest)
+          print(manifest.read_text())
 
           app = Path('android/app/src/main/kotlin/ir/cybermatrix/cybermatrix_tunnel/MyApplication.kt')
           app.parent.mkdir(parents=True, exist_ok=True)
