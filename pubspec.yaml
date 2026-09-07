@@ -1,14 +1,19 @@
 name: cybermatrix_tunnel
-description: CyberMatrix Tunnel Android client starter
+description: CyberMatrix Tunnel - Persian sing-box Android VPN client
 publish_to: "none"
-version: 0.1.0+1
+version: 1.0.0+10
 
 environment:
-  sdk: ">=3.8.0 <4.0.0"
+  sdk: ">=3.12.0 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  flutter_sing_box: ^1.2.0
+  mmkv: ^2.4.0
+  permission_handler: ^12.0.1
 
 dev_dependencies:
   flutter_test:
