@@ -20,16 +20,33 @@ jobs:
           channel: "stable"
           cache: true
 
-      - name: Generate Android project
+      - name: Generate Android project and native app wiring
         run: |
           flutter create --platforms=android --org ir.cybermatrix --project-name cybermatrix_tunnel .
           rm -f test/widget_test.dart
           python3 - <<'PY'
           from pathlib import Path
-          p = Path("android/app/src/main/AndroidManifest.xml")
-          s = p.read_text()
-          s = s.replace('android:label="cybermatrix_tunnel"', 'android:label="CyberMatrix Tunnel"')
-          p.write_text(s)
+
+          manifest = Path('android/app/src/main/AndroidManifest.xml')
+          text = manifest.read_text()
+          text = text.replace('android:label="cybermatrix_tunnel"', 'android:label="سایبرماتریکس تونل"')
+          text = text.replace('<application', '<application\n        android:name=".MyApplication"\n        android:usesCleartextTraffic="true"', 1)
+          manifest.write_text(text)
+
+          app = Path('android/app/src/main/kotlin/ir/cybermatrix/cybermatrix_tunnel/MyApplication.kt')
+          app.parent.mkdir(parents=True, exist_ok=True)
+          app.write_text('''package ir.cybermatrix.cybermatrix_tunnel
+
+          import android.app.Application
+          import com.tencent.mmkv.MMKV
+
+          class MyApplication : Application() {
+              override fun onCreate() {
+                  super.onCreate()
+                  MMKV.initialize(this)
+              }
+          }
+          ''')
           PY
 
       - name: Get packages
@@ -44,6 +61,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: cybermatrix-tunnel-apk
+          name: cybermatrix-tunnel-real-apk
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
