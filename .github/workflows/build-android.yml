@@ -31,22 +31,20 @@ jobs:
           android_ns = 'http://schemas.android.com/apk/res/android'
           ET.register_namespace('android', android_ns)
 
+          # Safe AndroidManifest edit.
           manifest = Path('android/app/src/main/AndroidManifest.xml')
           tree = ET.parse(manifest)
           root = tree.getroot()
           application = root.find('application')
           if application is None:
               raise RuntimeError('application node not found in AndroidManifest.xml')
-
           application.set(f'{{{android_ns}}}label', 'سایبرماتریکس تونل')
           application.set(f'{{{android_ns}}}name', '.MyApplication')
           application.set(f'{{{android_ns}}}usesCleartextTraffic', 'true')
           tree.write(manifest, encoding='utf-8', xml_declaration=True)
-
-          # Verify the manifest is still valid XML before Gradle runs.
           ET.parse(manifest)
-          print(manifest.read_text())
 
+          # MMKV initialization required by flutter_sing_box.
           app = Path('android/app/src/main/kotlin/ir/cybermatrix/cybermatrix_tunnel/MyApplication.kt')
           app.parent.mkdir(parents=True, exist_ok=True)
           app.write_text('''package ir.cybermatrix.cybermatrix_tunnel
@@ -62,22 +60,47 @@ jobs:
           }
           ''')
 
+          # Match flutter_sing_box Android requirements as closely as possible
+          # while staying on SDK 36 (SDK 37 is not available on this runner yet).
           app_gradle = Path('android/app/build.gradle.kts')
           text = app_gradle.read_text()
           text = text.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 36')
+          text = text.replace('minSdk = flutter.minSdkVersion', 'minSdk = 26')
+          text = text.replace('targetSdk = flutter.targetSdkVersion', 'targetSdk = 36')
           text = text.replace(
               'sourceCompatibility = JavaVersion.VERSION_17\n        targetCompatibility = JavaVersion.VERSION_17',
               'sourceCompatibility = JavaVersion.VERSION_17\n        targetCompatibility = JavaVersion.VERSION_17\n        isCoreLibraryDesugaringEnabled = true',
           )
+
           if 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")' not in text:
-              text += '\n\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")\n}\n'
+              text += '''
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+    implementation("com.tencent:mmkv:2.4.2")
+    modules {
+        module("com.tencent:mmkv-static") {
+            replacedBy("com.tencent:mmkv", "Using mmkv for Flutter")
+        }
+        module("com.tencent:mmkv-shared") {
+            replacedBy("com.tencent:mmkv", "Using mmkv for Flutter")
+        }
+    }
+}
+'''
           app_gradle.write_text(text)
 
+          # JitPack is required for singbox-android/libbox.
           root_gradle = Path('android/build.gradle.kts')
           text = root_gradle.read_text()
           if 'https://jitpack.io' not in text:
               text = text.replace('mavenCentral()', 'mavenCentral()\n        maven(url = "https://jitpack.io")', 1)
           root_gradle.write_text(text)
+
+          print('--- AndroidManifest.xml ---')
+          print(manifest.read_text())
+          print('--- app/build.gradle.kts ---')
+          print(app_gradle.read_text())
           PY
 
       - name: Get packages
@@ -92,10 +115,14 @@ jobs:
           fi
           echo "Patching $PLUGIN_GRADLE"
           sed -i 's/compileSdk = 37/compileSdk = 36/' "$PLUGIN_GRADLE"
-          grep -n 'compileSdk\|libbox' "$PLUGIN_GRADLE"
+          grep -n 'compileSdk\|minSdk\|libbox\|desugar' "$PLUGIN_GRADLE"
 
-      - name: Analyze
-        run: flutter analyze
+      - name: Validate project
+        run: |
+          flutter analyze
+          cd android
+          ./gradlew :app:processReleaseMainManifest --stacktrace
+          ./gradlew :app:checkReleaseAarMetadata --stacktrace
 
       - name: Build release APK
         run: flutter build apk --release
