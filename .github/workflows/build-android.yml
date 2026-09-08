@@ -46,6 +46,17 @@ jobs:
           if application is None:
               raise RuntimeError("application node not found")
 
+          # Camera permission for QR subscription scanning.
+          camera_permission = "android.permission.CAMERA"
+          already_has_camera = any(
+              item.get(f"{{{android_ns}}}name") == camera_permission
+              for item in root.findall("uses-permission")
+          )
+          if not already_has_camera:
+              permission = ET.Element("uses-permission")
+              permission.set(f"{{{android_ns}}}name", camera_permission)
+              root.insert(0, permission)
+
           application.set(f"{{{android_ns}}}label", "سایبرماتریکس تونل")
           application.set(f"{{{android_ns}}}name", ".MyApplication")
           application.set(f"{{{android_ns}}}usesCleartextTraffic", "true")
