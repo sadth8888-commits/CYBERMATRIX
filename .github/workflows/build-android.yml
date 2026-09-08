@@ -6,6 +6,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: cybermatrix-android-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -28,6 +32,9 @@ jobs:
           flutter create --platforms=android --org ir.cybermatrix --project-name cybermatrix_tunnel .
           rm -f test/widget_test.dart
 
+      - name: Apply CyberMatrix VPN runtime fix
+        run: python3 scripts/patch_vpn_runtime.py
+
       - name: Configure Android project
         shell: bash
         run: |
@@ -46,7 +53,6 @@ jobs:
           if application is None:
               raise RuntimeError("application node not found")
 
-          # Camera permission for QR subscription scanning.
           camera_permission = "android.permission.CAMERA"
           already_has_camera = any(
               item.get(f"{{{android_ns}}}name") == camera_permission
