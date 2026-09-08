@@ -104,15 +104,122 @@ insert = r'''
 
     final raw = jsonDecode(await source.readAsString()) as Map<String, dynamic>;
 
+    // sing-box requires every outbound/endpoint tag to be globally unique.
+    // Some subscriptions legally reuse display names (for example two nodes
+    // named "Cloud"), but the parser rejects those names when they become tags.
+    // Normalize duplicates deterministically and rewrite selector references so
+    // every server remains selectable instead of simply deleting duplicates.
+    int normalizedDuplicateTags = 0;
+    final outboundsValue = raw['outbounds'];
+    if (outboundsValue is List) {
+      final usedTags = <String>{};
+      final renamedByOriginal = <String, List<String>>{};
+
+      for (final item in outboundsValue) {
+        if (item is! Map<String, dynamic>) continue;
+        final original = item['tag']?.toString();
+        if (original == null || original.isEmpty) continue;
+
+        var candidate = original;
+        var suffix = 2;
+        while (usedTags.contains(candidate)) {
+          candidate = '$original · $suffix';
+          suffix++;
+        }
+        usedTags.add(candidate);
+        renamedByOriginal.putIfAbsent(original, () => <String>[]).add(candidate);
+        if (candidate != original) {
+          item['tag'] = candidate;
+          normalizedDuplicateTags++;
+        }
+      }
+
+      // Rewrite selector/urltest references occurrence-by-occurrence. This is
+      // important when the provider listed the same display tag more than once.
+      for (final item in outboundsValue) {
+        if (item is! Map<String, dynamic>) continue;
+        final refs = item['outbounds'];
+        if (refs is List) {
+          final occurrence = <String, int>{};
+          for (var i = 0; i < refs.length; i++) {
+            final original = refs[i]?.toString();
+            if (original == null) continue;
+            final choices = renamedByOriginal[original];
+            if (choices == null || choices.isEmpty) continue;
+            final index = occurrence[original] ?? 0;
+            refs[i] = choices[index < choices.length ? index : choices.length - 1];
+            occurrence[original] = index + 1;
+          }
+        }
+
+        final defaultTag = item['default']?.toString();
+        if (defaultTag != null) {
+          final choices = renamedByOriginal[defaultTag];
+          if (choices != null && choices.isNotEmpty) {
+            item['default'] = choices.first;
+          }
+        }
+      }
+
+      // Endpoints share the same tag namespace with outbounds in sing-box.
+      final endpointsValue = raw['endpoints'];
+      if (endpointsValue is List) {
+        for (final item in endpointsValue) {
+          if (item is! Map<String, dynamic>) continue;
+          final original = item['tag']?.toString();
+          if (original == null || original.isEmpty) continue;
+          var candidate = original;
+          var suffix = 2;
+          while (usedTags.contains(candidate)) {
+            candidate = '$original · endpoint $suffix';
+            suffix++;
+          }
+          usedTags.add(candidate);
+          if (candidate != original) {
+            item['tag'] = candidate;
+            normalizedDuplicateTags++;
+          }
+        }
+      }
+
+      // Route references to a duplicated name are inherently ambiguous; using
+      // the first matching normalized tag matches sing-box/provider behavior.
+      String normalizeReference(String value) {
+        final choices = renamedByOriginal[value];
+        return choices == null || choices.isEmpty ? value : choices.first;
+      }
+
+      final route = raw['route'];
+      if (route is Map<String, dynamic>) {
+        final routeFinal = route['final']?.toString();
+        if (routeFinal != null) route['final'] = normalizeReference(routeFinal);
+        final rules = route['rules'];
+        if (rules is List) {
+          for (final rule in rules) {
+            if (rule is! Map<String, dynamic>) continue;
+            final outbound = rule['outbound']?.toString();
+            if (outbound != null) rule['outbound'] = normalizeReference(outbound);
+          }
+        }
+      }
+    }
+
     // Persist the UI-selected server as the selector default before the native
-    // service validates/starts the configuration.
+    // service validates/starts the configuration. If that selected tag was a
+    // duplicate and got renamed above, prefer the exact surviving selector ref.
     final group = _selectorGroupTag;
     final server = _selectedServerTag;
     final outbounds = raw['outbounds'];
     if (group != null && server != null && outbounds is List) {
       for (final item in outbounds) {
         if (item is Map<String, dynamic> && item['tag'] == group) {
-          item['default'] = server;
+          final refs = item['outbounds'];
+          if (refs is List && refs.isNotEmpty) {
+            final exact = refs.where((e) => e?.toString() == server).toList();
+            item['default'] = exact.isNotEmpty ? server : refs.first.toString();
+          } else {
+            item['default'] = server;
+          }
           break;
         }
       }
@@ -142,12 +249,16 @@ insert = r'''
     );
 
     // Keep the local normalized profile in sync as a final fallback for the
-    // native service.
+    // native service. This also means the server list will use the normalized
+    // unique tags the next time it is loaded.
     await source.writeAsString(content, flush: true);
 
     if (mounted) {
       setState(() {
         _logs.add('CyberMatrix: runtime config آماده شد: ${nativePath ?? usingConfig.path}');
+        if (normalizedDuplicateTags > 0) {
+          _logs.add('CyberMatrix: $normalizedDuplicateTags تگ تکراری کانفیگ به‌صورت خودکار اصلاح شد.');
+        }
         if (_logs.length > 300) {
           _logs.removeRange(0, _logs.length - 300);
         }
@@ -267,8 +378,9 @@ old_select_else = """    } else {\n      _showMessage('سرور «${server.tag}�
 new_select_else = """    } else {\n      try {\n        await _prepareUsingConfig();\n      } catch (_) {}\n      _showMessage('سرور «${server.tag}» انتخاب شد و هنگام اتصال استفاده می‌شود.');\n    }"""
 text = text.replace(old_select_else, new_select_else, 1)
 
-text = text.replace("subtitle: Text('۱.۱.۰')", "subtitle: Text('۱.۱.۲')")
-text = text.replace("subtitle: Text('۱.۱.۱')", "subtitle: Text('۱.۱.۲')")
+text = text.replace("subtitle: Text('۱.۱.۰')", "subtitle: Text('۱.۱.۳')")
+text = text.replace("subtitle: Text('۱.۱.۱')", "subtitle: Text('۱.۱.۳')")
+text = text.replace("subtitle: Text('۱.۱.۲')", "subtitle: Text('۱.۱.۳')")
 
 path.write_text(text)
-print("Patched lib/main.dart with native runtime config handoff + diagnostics")
+print("Patched lib/main.dart with runtime config handoff + duplicate-tag normalization")
