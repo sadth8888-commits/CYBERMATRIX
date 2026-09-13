@@ -35,6 +35,9 @@ jobs:
       - name: Apply CyberMatrix VPN runtime fix
         run: python3 scripts/patch_vpn_runtime.py
 
+      - name: Add server ping tests
+        run: python3 scripts/patch_ping.py
+
       - name: Configure Android project
         shell: bash
         run: |
@@ -144,6 +147,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: cybermatrix-tunnel-v1.1.2-vpn-fix
+          name: cybermatrix-tunnel-v1.1.4-ping
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
